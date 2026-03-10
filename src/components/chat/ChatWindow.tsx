@@ -2,7 +2,9 @@
 
 import { useRef, useEffect } from 'react';
 import { useChat } from '@ai-sdk/react';
+import { DefaultChatTransport } from 'ai';
 import { Bot } from 'lucide-react';
+import { getClientAuth } from '@/lib/firebase';
 import type { AgentMode, AgentStyle } from '@/types/chat';
 import { createSession, saveMessage, updateSession } from '@/lib/chatFirestore';
 import ChatMessage from './ChatMessage';
@@ -42,6 +44,25 @@ function extractText(parts: MessagePart[]): string {
     .map((p) => p.text)
     .join('');
 }
+
+async function authenticatedChatFetch(input: RequestInfo | URL, init?: RequestInit) {
+  const idToken = await getClientAuth().currentUser?.getIdToken();
+  const headers = new Headers(init?.headers);
+
+  if (idToken) {
+    headers.set('Authorization', `Bearer ${idToken}`);
+  }
+
+  return fetch(input, {
+    ...init,
+    headers,
+  });
+}
+
+const chatTransport = new DefaultChatTransport({
+  api: '/api/chat',
+  fetch: authenticatedChatFetch,
+});
 
 export default function ChatWindow({
   activeSessionId,
@@ -83,9 +104,9 @@ export default function ChatWindow({
   }, [activeSessionId]);
 
   const { messages, sendMessage, status } = useChat({
-    api: '/api/chat',
+    transport: chatTransport,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    initialMessages: initialMessages as any,
+    messages: initialMessages as any,
   });
 
   const isBusy = status === 'submitted' || status === 'streaming';
@@ -164,7 +185,7 @@ export default function ChatWindow({
         )}
       </div>
 
-      {/* Input bar – in-flow, always at bottom */}
+      {/* Input bar - in-flow, always at bottom */}
       <div className="flex-shrink-0 px-8 pb-6 pt-3">
         <ChatInput
           onSend={handleSend}
@@ -180,10 +201,3 @@ export default function ChatWindow({
     </div>
   );
 }
-
-
-
-
-
-
-

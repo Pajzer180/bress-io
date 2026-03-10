@@ -2,6 +2,7 @@ import { openai } from '@ai-sdk/openai';
 import { streamText, convertToModelMessages, UIMessage, createUIMessageStream, createUIMessageStreamResponse } from 'ai';
 import { load } from 'cheerio';
 import type { AgentMode, AgentStyle } from '@/types/chat';
+import { requireAuthenticatedUid, toRouteErrorResponse } from '@/lib/server/firebaseAuth';
 
 const modeInstructions: Record<AgentMode, string> = {
   casual:
@@ -268,7 +269,10 @@ ${bodyText.slice(0, 5000)}
 }
 
 export async function POST(req: Request) {
-  const {
+  try {
+    await requireAuthenticatedUid(req);
+
+    const {
     messages,
     agentMode  = 'business' as AgentMode,
     agentStyle = 'action'   as AgentStyle,
@@ -458,7 +462,7 @@ export async function POST(req: Request) {
       },
     }),
   });
+  } catch (error) {
+    return toRouteErrorResponse(error);
+  }
 }
-
-
-

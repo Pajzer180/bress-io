@@ -11,6 +11,11 @@ import {
 } from 'firebase/firestore';
 import { writeChangeHistory } from '@/lib/changeHistory';
 import { getClientDb } from '@/lib/firebase';
+import {
+  assertProjectOwnedByUser,
+  requireAuthenticatedUid,
+  toRouteErrorResponse,
+} from '@/lib/server/firebaseAuth';
 import type { ActionType, ChangeSource, EntityType } from '@/types/history';
 
 interface SeoAction {
@@ -48,17 +53,21 @@ const SYSTEM_PROMPT = `Jestes Inzynierem SEO. Na podstawie instrukcji uzytkownik
 
 export async function POST(req: Request) {
   try {
+    const uid = await requireAuthenticatedUid(req);
     const {
       instruction,
       clientId = '123',
       projectId,
-      userId,
       siteUrl,
       pageUrl,
       source = 'chat',
       entityType = 'unknown',
       entityId = null,
     }: GenerateRequestBody = await req.json();
+
+    if (projectId) {
+      await assertProjectOwnedByUser(uid, projectId);
+    }
 
     const requestId = crypto.randomUUID();
 
@@ -90,17 +99,17 @@ export async function POST(req: Request) {
       status: 'active',
       createdAt: serverTimestamp(),
       projectId: projectId ?? null,
-      userId: userId ?? null,
+      userId: uid,
       siteUrl: siteUrl ?? null,
       pageUrl: pageUrl ?? null,
       requestId,
     });
 
     // 3b. Obowiazkowy wpis historii zmian (preview)
-    if (projectId && userId && siteUrl && pageUrl) {
+    if (projectId && siteUrl && pageUrl) {
       await writeChangeHistory({
         projectId,
-        userId,
+        userId: uid,
         siteUrl,
         pageUrl,
         actionType: inferActionType(parsed),
@@ -132,9 +141,8 @@ export async function POST(req: Request) {
       actionId: actionRef.id,
       requestId,
     });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error('[generate] Nieobsluzony blad:', err);
-    return NextResponse.json({ error: message }, { status: 500 });
+  } catch (error) {
+    console.error('[generate] Nieobsluzony blad:', error);
+    return toRouteErrorResponse(error);
   }
 }

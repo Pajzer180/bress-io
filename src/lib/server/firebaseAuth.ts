@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { doc, getDoc } from 'firebase/firestore';
+import { NextResponse } from 'next/server';
 import { getClientDb } from '@/lib/firebase';
 
 interface AccountsLookupResponse {
@@ -54,6 +55,18 @@ export async function requireAuthenticatedUid(req: Request): Promise<string> {
     throw new RouteError(401, 'Unauthorized');
   }
   return uid;
+}
+
+export function toRouteErrorResponse(error: unknown): NextResponse {
+  if (error instanceof RouteError) {
+    return NextResponse.json(
+      { error: error.message, details: error.details ?? null },
+      { status: error.status },
+    );
+  }
+
+  const message = error instanceof Error ? error.message : 'Internal server error';
+  return NextResponse.json({ error: message }, { status: 500 });
 }
 
 export async function assertProjectOwnedByUser(uid: string, projectId: string): Promise<void> {

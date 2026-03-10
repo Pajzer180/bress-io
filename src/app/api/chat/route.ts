@@ -3,6 +3,7 @@ import { streamText, convertToModelMessages, UIMessage, createUIMessageStream, c
 import { load } from 'cheerio';
 import type { AgentMode, AgentStyle } from '@/types/chat';
 import { requireAuthenticatedUid, toRouteErrorResponse } from '@/lib/server/firebaseAuth';
+import { enforceRateLimit } from '@/lib/server/rateLimit';
 
 const modeInstructions: Record<AgentMode, string> = {
   casual:
@@ -270,7 +271,11 @@ ${bodyText.slice(0, 5000)}
 
 export async function POST(req: Request) {
   try {
-    await requireAuthenticatedUid(req);
+    const uid = await requireAuthenticatedUid(req);
+    const rateLimitResponse = enforceRateLimit(req, { scope: 'chat', uid });
+    if (rateLimitResponse) {
+      return rateLimitResponse;
+    }
 
     const {
     messages,

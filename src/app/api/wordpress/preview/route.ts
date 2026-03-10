@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireAuthenticatedUid, RouteError } from '@/lib/server/firebaseAuth';
+import { enforceRateLimit } from '@/lib/server/rateLimit';
 import { createWordPressPreviewJob } from '@/lib/wordpress/service';
 import type { WordPressPreviewRequestBody } from '@/types/wordpress';
 
@@ -15,6 +16,11 @@ function toErrorResponse(error: unknown) {
 export async function POST(req: Request) {
   try {
     const uid = await requireAuthenticatedUid(req);
+    const rateLimitResponse = enforceRateLimit(req, { scope: 'wordpress-preview', uid });
+    if (rateLimitResponse) {
+      return rateLimitResponse;
+    }
+
     const body = (await req.json()) as WordPressPreviewRequestBody;
 
     if (body.targetType !== 'page' && body.targetType !== 'post') {

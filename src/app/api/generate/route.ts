@@ -16,6 +16,7 @@ import {
   requireAuthenticatedUid,
   toRouteErrorResponse,
 } from '@/lib/server/firebaseAuth';
+import { enforceRateLimit } from '@/lib/server/rateLimit';
 import type { ActionType, ChangeSource, EntityType } from '@/types/history';
 
 interface SeoAction {
@@ -54,6 +55,11 @@ const SYSTEM_PROMPT = `Jestes Inzynierem SEO. Na podstawie instrukcji uzytkownik
 export async function POST(req: Request) {
   try {
     const uid = await requireAuthenticatedUid(req);
+    const rateLimitResponse = enforceRateLimit(req, { scope: 'generate', uid });
+    if (rateLimitResponse) {
+      return rateLimitResponse;
+    }
+
     const {
       instruction,
       clientId = '123',

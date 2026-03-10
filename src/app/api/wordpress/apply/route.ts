@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { writeChangeHistory } from '@/lib/changeHistory';
 import { assertProjectOwnedByUser, requireAuthenticatedUid, RouteError } from '@/lib/server/firebaseAuth';
+import { enforceRateLimit } from '@/lib/server/rateLimit';
 import { toWordPressApiPath, wordpressRequest } from '@/lib/wordpress/client';
 import {
   applyWordPressPreviewJob,
@@ -74,6 +75,11 @@ export async function POST(req: Request) {
 
   try {
     const uid = await requireAuthenticatedUid(req);
+    const rateLimitResponse = enforceRateLimit(req, { scope: 'wordpress-apply', uid });
+    if (rateLimitResponse) {
+      return rateLimitResponse;
+    }
+
     const body = (await req.json()) as ApplyBody;
 
     if (body.jobId) {

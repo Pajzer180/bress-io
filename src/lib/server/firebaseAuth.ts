@@ -3,22 +3,20 @@ import 'server-only';
 import { doc, getDoc } from 'firebase/firestore';
 import { NextResponse } from 'next/server';
 import { getClientDb } from '@/lib/firebase';
+import { RouteError } from '@/lib/server/routeError';
+import {
+  readResponseTextWithinLimit,
+  safeRemoteFetch,
+} from '@/lib/server/safeRemoteFetch';
 
 interface AccountsLookupResponse {
   users?: Array<{ localId?: string }>;
 }
 
-export class RouteError extends Error {
-  status: number;
-  details?: unknown;
+const FIREBASE_ACCOUNTS_LOOKUP_TIMEOUT_MS = 5_000;
+const FIREBASE_ACCOUNTS_LOOKUP_MAX_RESPONSE_BYTES = 256_000;
 
-  constructor(status: number, message: string, details?: unknown) {
-    super(message);
-    this.name = 'RouteError';
-    this.status = status;
-    this.details = details;
-  }
-}
+export { RouteError } from '@/lib/server/routeError';
 
 export async function resolveUidFromBearerToken(req: Request): Promise<string | null> {
   const authHeader = req.headers.get('authorization') ?? '';
@@ -33,19 +31,19 @@ export async function resolveUidFromBearerToken(req: Request): Promise<string | 
     throw new RouteError(500, 'Missing NEXT_PUBLIC_FIREBASE_API_KEY');
   }
 
-  const response = await fetch(
-    `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${apiKey}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ idToken }),
-      cache: 'no-store',
-    },
-  );
+  const response = await safeRemoteFetch({
+    url: `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${apiKey}`,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ idToken }),
+    cache: 'no-store',
+    timeoutMs: FIREBASE_ACCOUNTS_LOOKUP_TIMEOUT_MS,
+  });
 
   if (!response.ok) return null;
 
-  const data = (await response.json()) as AccountsLookupResponse;
+  const rawText = await readResponseTextWithinLimit(response, FIREBASE_ACCOUNTS_LOOKUP_MAX_RESPONSE_BYTES);
+  const data = (rawText ? JSON.parse(rawText) : {}) as AccountsLookupResponse;
   return data.users?.[0]?.localId ?? null;
 }
 

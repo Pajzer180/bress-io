@@ -1,5 +1,11 @@
 import 'server-only';
 
+import {
+  normalizeRemoteHttpUrl,
+  readResponseTextWithinLimit,
+  safeRemoteFetch,
+} from '@/lib/server/safeRemoteFetch';
+
 export type WordPressHttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
 interface WordPressRequestOptions {
@@ -11,6 +17,9 @@ interface WordPressRequestOptions {
   body?: unknown;
   searchParams?: Record<string, string | number | boolean | null | undefined>;
 }
+
+const WORDPRESS_FETCH_TIMEOUT_MS = 10_000;
+const WORDPRESS_FETCH_MAX_RESPONSE_BYTES = 1_000_000;
 
 export class WordPressApiError extends Error {
   status: number;
@@ -27,16 +36,7 @@ export class WordPressApiError extends Error {
 }
 
 export function normalizeWordPressSiteUrl(input: string): string {
-  const trimmed = input.trim();
-  if (!trimmed) {
-    throw new Error('Podaj siteUrl.');
-  }
-
-  const withProtocol = /^https?:\/\//i.test(trimmed)
-    ? trimmed
-    : `https://${trimmed}`;
-
-  const url = new URL(withProtocol);
+  const url = normalizeRemoteHttpUrl(input, { defaultProtocol: 'https:' });
   const pathname = url.pathname.replace(/\/+$/, '');
   return `${url.protocol}//${url.host}${pathname === '/' ? '' : pathname}`;
 }
@@ -92,7 +92,8 @@ export async function wordpressRequest<T>(options: WordPressRequestOptions): Pro
   const url = buildWordPressUrl(options.siteUrl, options.path, options.searchParams);
   const auth = Buffer.from(`${options.username}:${options.applicationPassword}`).toString('base64');
 
-  const response = await fetch(url, {
+  const response = await safeRemoteFetch({
+    url,
     method: options.method ?? 'GET',
     headers: {
       Authorization: `Basic ${auth}`,
@@ -100,9 +101,10 @@ export async function wordpressRequest<T>(options: WordPressRequestOptions): Pro
     },
     cache: 'no-store',
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    timeoutMs: WORDPRESS_FETCH_TIMEOUT_MS,
   });
 
-  const rawText = await response.text();
+  const rawText = await readResponseTextWithinLimit(response, WORDPRESS_FETCH_MAX_RESPONSE_BYTES);
   const parsed = safeJsonParse(rawText);
 
   if (!response.ok) {

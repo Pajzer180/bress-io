@@ -4,6 +4,10 @@ import { load } from 'cheerio';
 import type { AgentMode, AgentStyle } from '@/types/chat';
 import { requireAuthenticatedUid, toRouteErrorResponse } from '@/lib/server/firebaseAuth';
 import { enforceRateLimit } from '@/lib/server/rateLimit';
+import { readResponseTextWithinLimit, safeRemoteFetch } from '@/lib/server/safeRemoteFetch';
+
+const CHAT_REMOTE_FETCH_TIMEOUT_MS = 8_000;
+const CHAT_REMOTE_FETCH_MAX_RESPONSE_BYTES = 2_000_000;
 
 const modeInstructions: Record<AgentMode, string> = {
   casual:
@@ -97,123 +101,123 @@ function calculateSeoScore(data: PageData): number {
 }
 
 async function scrapeUrl(url: string): Promise<{ context: string; seoCardData: SeoCardData }> {
-  try {
-    const res = await fetch(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; BressBot/1.0)' },
-      signal: AbortSignal.timeout(8000),
-    });
-    const html = await res.text();
-    const $ = load(html);
+  const res = await safeRemoteFetch({
+    url,
+    headers: { 'User-Agent': 'Mozilla/5.0 (compatible; BressBot/1.0)' },
+    timeoutMs: CHAT_REMOTE_FETCH_TIMEOUT_MS,
+  });
+  const html = await readResponseTextWithinLimit(res, CHAT_REMOTE_FETCH_MAX_RESPONSE_BYTES);
+  const $ = load(html);
 
-    $('script, style, nav, footer, header, iframe, .cookie').remove();
+  $('script, style, nav, footer, header, iframe, .cookie').remove();
 
-    const title = $('title').text().trim();
-    const metaDesc = $('meta[name="description"]').attr('content') ?? 'brak';
-    const canonical = $('link[rel="canonical"]').attr('href') ?? 'brak';
-    const robots = $('meta[name="robots"]').attr('content') ?? 'brak';
-    const ogTitle = $('meta[property="og:title"]').attr('content') ?? 'brak';
-    const ogDescription = $('meta[property="og:description"]').attr('content') ?? 'brak';
-    const rawH1 = $('h1').map((_, el) => $(el).text().trim()).get().join(' | ');
-    const h2s = $('h2').map((_, el) => $(el).text().trim()).get().slice(0, 10);
+  const title = $('title').text().trim();
+  const metaDesc = $('meta[name="description"]').attr('content') ?? 'brak';
+  const canonical = $('link[rel="canonical"]').attr('href') ?? 'brak';
+  const robots = $('meta[name="robots"]').attr('content') ?? 'brak';
+  const ogTitle = $('meta[property="og:title"]').attr('content') ?? 'brak';
+  const ogDescription = $('meta[property="og:description"]').attr('content') ?? 'brak';
+  const rawH1 = $('h1').map((_, el) => $(el).text().trim()).get().join(' | ');
+  const h2s = $('h2').map((_, el) => $(el).text().trim()).get().slice(0, 10);
 
-    const imageNodes = $('img');
-    const imagesTotal = imageNodes.length;
-    const imgsMissing = imageNodes.filter((_, el) => {
-      const alt = $(el).attr('alt');
-      return alt === undefined || alt.trim() === '';
-    }).length;
+  const imageNodes = $('img');
+  const imagesTotal = imageNodes.length;
+  const imgsMissing = imageNodes.filter((_, el) => {
+    const alt = $(el).attr('alt');
+    return alt === undefined || alt.trim() === '';
+  }).length;
 
-    const pageHost = (() => {
-      try {
-        return new URL(url).hostname.replace(/^www\./, '');
-      } catch {
-        return '';
-      }
-    })();
+  const pageHost = (() => {
+    try {
+      return new URL(url).hostname.replace(/^www\./, '');
+    } catch {
+      return '';
+    }
+  })();
 
-    const hrefs = $('a[href]')
-      .map((_, el) => ($(el).attr('href') || '').trim())
-      .get()
-      .filter(Boolean);
+  const hrefs = $('a[href]')
+    .map((_, el) => ($(el).attr('href') || '').trim())
+    .get()
+    .filter(Boolean);
 
-    let linksInternalCount = 0;
-    let linksExternalCount = 0;
+  let linksInternalCount = 0;
+  let linksExternalCount = 0;
 
-    for (const href of hrefs) {
-      if (
-        href.startsWith('#') ||
-        href.startsWith('mailto:') ||
-        href.startsWith('tel:') ||
-        href.startsWith('javascript:')
-      ) {
-        continue;
-      }
-
-      try {
-        const resolved = new URL(href, url);
-        const linkHost = resolved.hostname.replace(/^www\./, '');
-        if (!pageHost || linkHost === pageHost) linksInternalCount += 1;
-        else linksExternalCount += 1;
-      } catch {
-        // ignore malformed urls
-      }
+  for (const href of hrefs) {
+    if (
+      href.startsWith('#') ||
+      href.startsWith('mailto:') ||
+      href.startsWith('tel:') ||
+      href.startsWith('javascript:')
+    ) {
+      continue;
     }
 
-    const ctaRegex = /\b(kup|zamow|skontaktuj|kontakt|umow|zaczni|zacznij|sprawdz|wycen|demo|oferta|zapisz|dolacz)\b/i;
-    const ctaCandidates = $('button, a')
-      .map((_, el) => $(el).text().replace(/\s+/g, ' ').trim())
-      .get()
-      .filter((text) => text.length > 0 && text.length <= 80 && ctaRegex.test(text));
-    const ctaUnique = Array.from(new Set(ctaCandidates));
-    const ctaCount = ctaUnique.length;
-    const ctaExamples = ctaUnique.slice(0, 5);
+    try {
+      const resolved = new URL(href, url);
+      const linkHost = resolved.hostname.replace(/^www\./, '');
+      if (!pageHost || linkHost === pageHost) linksInternalCount += 1;
+      else linksExternalCount += 1;
+    } catch {
+      // ignore malformed urls
+    }
+  }
 
-    const sectionCount =
-      $('section').length || $('main').children().length || $('body').children().length;
-    const bodyText = $('body').text().replace(/\s+/g, ' ').trim();
-    const wordCount = bodyText.split(' ').filter(Boolean).length;
+  const ctaRegex = /\b(kup|zamow|skontaktuj|kontakt|umow|zaczni|zacznij|sprawdz|wycen|demo|oferta|zapisz|dolacz)\b/i;
+  const ctaCandidates = $('button, a')
+    .map((_, el) => $(el).text().replace(/\s+/g, ' ').trim())
+    .get()
+    .filter((text) => text.length > 0 && text.length <= 80 && ctaRegex.test(text));
+  const ctaUnique = Array.from(new Set(ctaCandidates));
+  const ctaCount = ctaUnique.length;
+  const ctaExamples = ctaUnique.slice(0, 5);
 
-    const hasMetaDescription = metaDesc !== 'brak' && metaDesc.trim().length > 0;
-    const hasCanonical = canonical !== 'brak' && canonical.trim().length > 0;
-    const hasRobots = robots !== 'brak' && robots.trim().length > 0;
+  const sectionCount =
+    $('section').length || $('main').children().length || $('body').children().length;
+  const bodyText = $('body').text().replace(/\s+/g, ' ').trim();
+  const wordCount = bodyText.split(' ').filter(Boolean).length;
 
-    const jsRendered = isJsRendered(html, { h1: rawH1, title });
-    const h1 = jsRendered ? 'JS_RENDERED' : rawH1 || 'BRAK H1!';
+  const hasMetaDescription = metaDesc !== 'brak' && metaDesc.trim().length > 0;
+  const hasCanonical = canonical !== 'brak' && canonical.trim().length > 0;
+  const hasRobots = robots !== 'brak' && robots.trim().length > 0;
 
-    const score = calculateSeoScore({
-      title,
-      metaDescription: metaDesc,
-      h1,
-      h2Count: h2s.length,
-      imagesWithoutAlt: imgsMissing,
-      wordCount,
-    });
+  const jsRendered = isJsRendered(html, { h1: rawH1, title });
+  const h1 = jsRendered ? 'JS_RENDERED' : rawH1 || 'BRAK H1!';
 
-    const seoCardData: SeoCardData = {
-      url,
-      title: { ok: !!title && title.length <= 60 && title.length >= 20, text: title || 'BRAK!' },
-      h1: { ok: !jsRendered && !!rawH1, text: rawH1 || (jsRendered ? 'JS_RENDERED' : 'BRAK!'), jsRendered },
-      h2s,
-      imgs: imgsMissing,
-      score,
-      metaDescription: metaDesc,
-      canonical,
-      robots,
-      ogTitle,
-      ogDescription,
-      linksInternalCount,
-      linksExternalCount,
-      ctaCount,
-      ctaExamples,
-      sectionCount,
-      imagesTotal,
-      imagesWithoutAlt: imgsMissing,
-      hasMetaDescription,
-      hasCanonical,
-      hasRobots,
-    };
+  const score = calculateSeoScore({
+    title,
+    metaDescription: metaDesc,
+    h1,
+    h2Count: h2s.length,
+    imagesWithoutAlt: imgsMissing,
+    wordCount,
+  });
 
-    const context = `
+  const seoCardData: SeoCardData = {
+    url,
+    title: { ok: !!title && title.length <= 60 && title.length >= 20, text: title || 'BRAK!' },
+    h1: { ok: !jsRendered && !!rawH1, text: rawH1 || (jsRendered ? 'JS_RENDERED' : 'BRAK!'), jsRendered },
+    h2s,
+    imgs: imgsMissing,
+    score,
+    metaDescription: metaDesc,
+    canonical,
+    robots,
+    ogTitle,
+    ogDescription,
+    linksInternalCount,
+    linksExternalCount,
+    ctaCount,
+    ctaExamples,
+    sectionCount,
+    imagesTotal,
+    imagesWithoutAlt: imgsMissing,
+    hasMetaDescription,
+    hasCanonical,
+    hasRobots,
+  };
+
+  const context = `
 === DANE STRONY DO ANALIZY SEO ===
 URL: ${url}
 Title tag: ${title || 'BRAK!'}
@@ -239,34 +243,7 @@ ${bodyText.slice(0, 5000)}
 =================================
 `;
 
-    return { context, seoCardData };
-  } catch (e) {
-    const seoCardData: SeoCardData = {
-      url,
-      title: { ok: false, text: 'BLAD POBIERANIA' },
-      h1: { ok: false, text: 'BLAD', jsRendered: false },
-      h2s: [],
-      imgs: 0,
-      score: null,
-      metaDescription: 'brak',
-      canonical: 'brak',
-      robots: 'brak',
-      ogTitle: 'brak',
-      ogDescription: 'brak',
-      linksInternalCount: 0,
-      linksExternalCount: 0,
-      ctaCount: 0,
-      ctaExamples: [],
-      sectionCount: 0,
-      imagesTotal: 0,
-      imagesWithoutAlt: 0,
-      hasMetaDescription: false,
-      hasCanonical: false,
-      hasRobots: false,
-    };
-
-    return { context: `Nie udalo sie pobrac strony: ${url}. Blad: ${String(e)}`, seoCardData };
-  }
+  return { context, seoCardData };
 }
 
 export async function POST(req: Request) {

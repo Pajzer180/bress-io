@@ -40,10 +40,16 @@ Shared helpers used by protected routes:
 - `normalizeRemoteHttpUrl()`, `assertSafeRemoteUrl()`, `safeRemoteFetch()`, and `readResponseTextWithinLimit()` for remote URL hardening
 
 Env vars used by this backend:
-- `NEXT_PUBLIC_FIREBASE_API_KEY` for Firebase token lookup
+- `NEXT_PUBLIC_FIREBASE_API_KEY` for the current Identity Toolkit token lookup path
+- `FIREBASE_ADMIN_PROJECT_ID`, `FIREBASE_ADMIN_CLIENT_EMAIL`, and `FIREBASE_ADMIN_PRIVATE_KEY` for the new server-only Firebase Admin layer in `src/lib/server/firebaseAdmin.ts`
 - `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` for model-backed routes
 - `WORDPRESS_CREDENTIALS_SECRET` for encrypting stored WordPress credentials
 - `RATE_LIMIT_*` variables from `.env.example` to override per-route limits and windows
+
+Firebase Admin layer:
+- The Admin module is server-only, initializes lazily, and reuses the existing default Admin app when it already exists.
+- Credentials are read from env vars instead of a checked-in service-account JSON file.
+- Current auth behavior stays unchanged for now; step 2.2 can switch `resolveUidFromBearerToken()` from Identity Toolkit lookup to `getFirebaseAdminAuth().verifyIdToken(...)`.
 
 Rate limiting behavior:
 - Rate limiting is in-memory and per application instance.

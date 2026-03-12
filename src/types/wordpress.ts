@@ -1,10 +1,15 @@
+import type {
+  ChangeJobChangeType,
+  ChangeJobStatus,
+  ChangeJobValue,
+} from '@/types/changeJobs';
 import type { ActionType, ChangeSource, EntityType } from '@/types/history';
 
 export type WordPressConnectionStatus = 'connected' | 'failed' | 'disconnected';
 export type WordPressJobStatus = 'preview' | 'applied' | 'failed';
 export type WordPressTargetType = 'page' | 'post';
 export type WordPressTargetTypePlural = 'pages' | 'posts';
-export type WordPressChangedField = 'title' | 'content';
+export type WordPressChangedField = 'title' | 'content' | 'meta_description';
 export type WordPressApplyMethod = 'POST' | 'PUT' | 'PATCH';
 
 export interface WordPressConnectionRecord {
@@ -25,11 +30,13 @@ export interface WordPressConnectionRecord {
 export interface WordPressJobSnapshot {
   title: string;
   content: string;
+  metaDescription?: string | null;
 }
 
 export interface WordPressJobUpdatePayload {
   title?: string;
   content?: string;
+  metaDescription?: string;
 }
 
 export interface WordPressJobRecord {
@@ -93,21 +100,31 @@ export interface WordPressPreviewRequestBody {
   targetId: number;
   suggestedTitle?: string;
   suggestedContent?: string;
+  suggestedMetaDescription?: string;
 }
 
 export interface WordPressPreviewResponse {
   ok: true;
   jobId: string;
-  status: 'preview';
+  projectId: string;
+  status: Extract<ChangeJobStatus, 'preview_ready'>;
+  changeType: ChangeJobChangeType;
+  pageUrl: string;
   targetType: WordPressTargetType;
   targetId: number;
   targetUrl?: string | null;
+  beforeValue: ChangeJobValue;
+  proposedValue: Exclude<ChangeJobValue, null>;
+  previewSummary: string;
+  requestId: string;
   currentTitle: string;
   currentContent: string;
+  currentMetaDescription?: string | null;
   suggestedTitle: string;
   suggestedContent: string;
+  suggestedMetaDescription?: string;
   changedFields: WordPressChangedField[];
-  createdAt: string;
+  createdAt: number;
 }
 
 export interface WordPressApplyJobRequestBody {

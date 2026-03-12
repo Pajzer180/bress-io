@@ -4,10 +4,12 @@ import {
   requireAuthenticatedUid,
   toRouteErrorResponse,
 } from '@/lib/server/firebaseAuth';
+import { createWordPressPreviewJob } from '@/lib/wordpress/service';
+import { enforceRateLimit } from '@/lib/server/rateLimit';
 import { wordpressPreviewRequestSchema } from '@/lib/server/schemas/wordpress';
 import { readJsonRequestBody } from '@/lib/server/validation';
-import { enforceRateLimit } from '@/lib/server/rateLimit';
-import { createWordPressPreviewJob } from '@/lib/wordpress/service';
+
+export const runtime = 'nodejs';
 
 export async function POST(req: Request) {
   try {
@@ -23,6 +25,7 @@ export async function POST(req: Request) {
       targetId,
       suggestedTitle,
       suggestedContent,
+      suggestedMetaDescription,
     } = await readJsonRequestBody(req, wordpressPreviewRequestSchema);
 
     if (projectId) {
@@ -31,10 +34,12 @@ export async function POST(req: Request) {
 
     const response = await createWordPressPreviewJob({
       uid,
+      projectId,
       targetType,
       targetId,
       suggestedTitle,
       suggestedContent,
+      suggestedMetaDescription,
     });
 
     return NextResponse.json(response);

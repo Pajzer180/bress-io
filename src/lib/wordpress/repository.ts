@@ -1,34 +1,25 @@
 import 'server-only';
 
-import {
-  addDoc,
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  limit as limitQuery,
-  query,
-  setDoc,
-  updateDoc,
-  where,
-} from 'firebase/firestore';
-import { getClientDb } from '@/lib/firebase';
-import type { ProjectWordPressState } from '@/lib/snippetActions';
+import { getFirestoreAdmin } from '@/lib/server/firestoreAdmin';
+import type { ProjectWordPressState } from '@/types/project';
 import type {
   WordPressConnectionRecord,
   WordPressJobRecord,
 } from '@/types/wordpress';
 
 function getConnectionRef(userId: string) {
-  const db = getClientDb();
-  return doc(db, 'wordpress_connections', userId);
+  return getFirestoreAdmin().collection('wordpress_connections').doc(userId);
+}
+
+function wordPressJobsCollection() {
+  return getFirestoreAdmin().collection('wordpress_jobs');
 }
 
 export async function getWordPressConnection(
   userId: string,
 ): Promise<WordPressConnectionRecord | null> {
-  const snap = await getDoc(getConnectionRef(userId));
-  if (!snap.exists()) return null;
+  const snap = await getConnectionRef(userId).get();
+  if (!snap.exists) return null;
 
   return {
     id: snap.id,
@@ -39,7 +30,7 @@ export async function getWordPressConnection(
 export async function saveWordPressConnection(
   connection: Omit<WordPressConnectionRecord, 'id'>,
 ): Promise<WordPressConnectionRecord> {
-  await setDoc(getConnectionRef(connection.userId), connection);
+  await getConnectionRef(connection.userId).set(connection);
   return {
     id: connection.userId,
     ...connection,
@@ -50,8 +41,7 @@ export async function updateProjectWordPressSummary(
   projectId: string,
   summary: ProjectWordPressState | null,
 ): Promise<void> {
-  const db = getClientDb();
-  await updateDoc(doc(db, 'projects', projectId), {
+  await getFirestoreAdmin().collection('projects').doc(projectId).update({
     wordpress: summary,
     updatedAt: Date.now(),
   });
@@ -59,9 +49,10 @@ export async function updateProjectWordPressSummary(
 
 export async function createWordPressJob(
   job: Omit<WordPressJobRecord, 'id'>,
+  jobId?: string,
 ): Promise<WordPressJobRecord> {
-  const db = getClientDb();
-  const ref = await addDoc(collection(db, 'wordpress_jobs'), job);
+  const ref = jobId ? wordPressJobsCollection().doc(jobId) : wordPressJobsCollection().doc();
+  await ref.set(job);
   return {
     id: ref.id,
     ...job,
@@ -71,9 +62,8 @@ export async function createWordPressJob(
 export async function getWordPressJob(
   jobId: string,
 ): Promise<WordPressJobRecord | null> {
-  const db = getClientDb();
-  const snap = await getDoc(doc(db, 'wordpress_jobs', jobId));
-  if (!snap.exists()) return null;
+  const snap = await wordPressJobsCollection().doc(jobId).get();
+  if (!snap.exists) return null;
 
   return {
     id: snap.id,
@@ -85,21 +75,17 @@ export async function updateWordPressJob(
   jobId: string,
   patch: Partial<Omit<WordPressJobRecord, 'id'>>,
 ): Promise<void> {
-  const db = getClientDb();
-  await updateDoc(doc(db, 'wordpress_jobs', jobId), patch);
+  await wordPressJobsCollection().doc(jobId).update(patch);
 }
 
 export async function listWordPressJobsByUser(
   userId: string,
   limitCount = 20,
 ): Promise<WordPressJobRecord[]> {
-  const db = getClientDb();
-  const q = query(
-    collection(db, 'wordpress_jobs'),
-    where('userId', '==', userId),
-    limitQuery(limitCount),
-  );
-  const snap = await getDocs(q);
+  const snap = await wordPressJobsCollection()
+    .where('userId', '==', userId)
+    .limit(limitCount)
+    .get();
 
   return snap.docs
     .map((item) => ({

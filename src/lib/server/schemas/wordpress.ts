@@ -58,6 +58,11 @@ const actionTypeSchema = z.enum([
 const entityTypeSchema = z.enum(['page', 'post', 'homepage', 'unknown']);
 
 const payloadSchema = z.record(z.string(), z.unknown());
+const previewTextValueSchema = z.string().max(MAX_TEXT_LENGTH).optional();
+
+function hasPreviewTextValue(value: string | undefined): boolean {
+  return typeof value === 'string' && value.trim().length > 0;
+}
 
 export const wordpressConnectRequestSchema = z.object({
   projectId: projectIdSchema,
@@ -78,13 +83,16 @@ export const wordpressPreviewRequestSchema = z.object({
   projectId: projectIdSchema,
   targetType: z.enum(['page', 'post']),
   targetId: z.number().int().positive(),
-  suggestedTitle: z.string().max(MAX_TEXT_LENGTH).optional(),
-  suggestedContent: z.string().max(MAX_TEXT_LENGTH).optional(),
+  suggestedTitle: previewTextValueSchema,
+  suggestedContent: previewTextValueSchema,
+  suggestedMetaDescription: previewTextValueSchema,
 }).strict().superRefine((value, ctx) => {
-  if (value.suggestedTitle === undefined && value.suggestedContent === undefined) {
+  if (!hasPreviewTextValue(value.suggestedTitle)
+    && !hasPreviewTextValue(value.suggestedContent)
+    && !hasPreviewTextValue(value.suggestedMetaDescription)) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
-      message: 'Provide suggestedTitle or suggestedContent.',
+      message: 'Provide suggestedTitle, suggestedContent, or suggestedMetaDescription.',
       path: ['suggestedTitle'],
     });
   }

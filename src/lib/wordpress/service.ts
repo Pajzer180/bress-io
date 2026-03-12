@@ -2,11 +2,13 @@ import 'server-only';
 
 import { randomUUID } from 'crypto';
 import { writeChangeHistory } from '@/lib/changeHistory';
+import { captureBaselineMeasurementsForAppliedJob } from '@/lib/server/changeMeasurements';
 import {
   createChangeJob,
   getChangeJob,
   markChangeJobApplied,
   markChangeJobFailed,
+  markChangeJobRolledBack,
   updateChangeJob,
 } from '@/lib/server/changeJobs';
 import {
@@ -44,6 +46,7 @@ import type {
   WordPressItemSummary,
   WordPressJobRecord,
   WordPressPreviewResponse,
+  WordPressRollbackResponse,
   WordPressTargetType,
   WordPressTargetTypePlural,
 } from '@/types/wordpress';
@@ -454,7 +457,10 @@ function resolveChangeJobTargetId(entityId: string | null): number {
 function normalizeChangeJobValueForApply(
   value: ChangeJobValue,
   changeType: ChangeJobChangeType,
-  valueLabel: 'beforeValue' | 'proposedValue',
+  valueLabel: 'beforeValue' | 'proposedValue' | 'appliedValue' | 'rollbackValue',
+  options: {
+    allowNullableMetaDescription?: boolean;
+  } = {},
 ): Record<string, unknown> {
   if (isRecord(value)) {
     return value;
@@ -473,10 +479,11 @@ function normalizeChangeJobValueForApply(
     }
   }
 
-  if (value === null && valueLabel === 'beforeValue' && changeType === 'meta_description') {
+  if (value === null && changeType === 'meta_description' && options.allowNullableMetaDescription) {
     return { metaDescription: null };
   }
-  throw new RouteError(409, `Change job ma nieprawidlowe ${valueLabel}.`, {
+
+  throw new RouteError(409, 'Change job ma nieprawidlowe ' + valueLabel + '.', {
     code: 'CHANGE_JOB_INVALID_PAYLOAD',
     valueLabel,
     changeType,
@@ -595,6 +602,40 @@ function getProposedFieldValue(
   }
 }
 
+function getRollbackFieldValue(
+  rollbackValue: Record<string, unknown>,
+  field: WordPressChangedField,
+): string | null {
+  switch (field) {
+    case 'title':
+      if (typeof rollbackValue.title !== 'string') {
+        throw new RouteError(409, 'Change job ma nieprawidlowa rollbackValue.title.', {
+          code: 'CHANGE_JOB_INVALID_PAYLOAD',
+          field: 'title',
+        });
+      }
+      return rollbackValue.title;
+    case 'content':
+      if (typeof rollbackValue.content !== 'string') {
+        throw new RouteError(409, 'Change job ma nieprawidlowa rollbackValue.content.', {
+          code: 'CHANGE_JOB_INVALID_PAYLOAD',
+          field: 'content',
+        });
+      }
+      return rollbackValue.content;
+    case 'meta_description':
+      if (rollbackValue.metaDescription !== null && typeof rollbackValue.metaDescription !== 'string') {
+        throw new RouteError(409, 'Change job ma nieprawidlowa rollbackValue.metaDescription.', {
+          code: 'CHANGE_JOB_INVALID_PAYLOAD',
+          field: 'metaDescription',
+        });
+      }
+      return (rollbackValue.metaDescription as string | null | undefined) ?? null;
+    default:
+      return null;
+  }
+}
+
 function getCurrentFieldValue(
   snapshot: CurrentWordPressSnapshot,
   field: WordPressChangedField,
@@ -695,13 +736,79 @@ function buildWordPressApplyPayload(args: {
   return payload;
 }
 
+function buildWordPressRollbackPayload(args: {
+  resource: WordPressResourceResponse;
+  changedFields: WordPressChangedField[];
+  appliedValue: Record<string, unknown>;
+  rollbackValue: Record<string, unknown>;
+}): Record<string, unknown> {
+  const payload: Record<string, unknown> = {};
+
+  for (const field of args.changedFields) {
+    switch (field) {
+      case 'title': {
+        const nextValue = getRollbackFieldValue(args.rollbackValue, 'title');
+        if (typeof nextValue !== 'string') {
+          throw new RouteError(409, 'Change job ma nieprawidlowa rollbackValue.title.', {
+            code: 'CHANGE_JOB_INVALID_PAYLOAD',
+            field: 'title',
+          });
+        }
+        payload.title = nextValue;
+        break;
+      }
+      case 'content': {
+        const nextValue = getRollbackFieldValue(args.rollbackValue, 'content');
+        if (typeof nextValue !== 'string') {
+          throw new RouteError(409, 'Change job ma nieprawidlowa rollbackValue.content.', {
+            code: 'CHANGE_JOB_INVALID_PAYLOAD',
+            field: 'content',
+          });
+        }
+        payload.content = nextValue;
+        break;
+      }
+      case 'meta_description': {
+        const expectedCurrentValue = getProposedFieldValue(args.appliedValue, 'meta_description');
+        const nextValue = getRollbackFieldValue(args.rollbackValue, 'meta_description');
+        const keys = resolveMetaDescriptionUpdateKeys(args.resource, expectedCurrentValue);
+        if (!keys.length) {
+          throw new RouteError(409, 'Nie mozna wycofac meta description dla tego change job.', {
+            code: 'CHANGE_JOB_TARGET_UNSUPPORTED',
+            field: 'metaDescription',
+          });
+        }
+
+        const metaPayload: Record<string, string> = {};
+        for (const key of keys) {
+          metaPayload[key] = nextValue ?? '';
+        }
+        payload.meta = metaPayload;
+        break;
+      }
+      default:
+        break;
+    }
+  }
+
+  if (!Object.keys(payload).length) {
+    throw new RouteError(409, 'Change job nie zawiera wspieranych zmian do wycofania.', {
+      code: 'CHANGE_JOB_UNSUPPORTED_CHANGE',
+    });
+  }
+
+  return payload;
+}
+
 function buildCanonicalApplyPlan(job: ChangeJobRecord): CanonicalWordPressApplyPlan {
   const proposedValue = normalizeChangeJobValueForApply(job.proposedValue, job.changeType, 'proposedValue');
 
   return {
     targetType: resolveChangeJobTargetType(job.entityType),
     targetId: resolveChangeJobTargetId(job.entityId),
-    beforeValue: normalizeChangeJobValueForApply(job.beforeValue, job.changeType, 'beforeValue'),
+    beforeValue: normalizeChangeJobValueForApply(job.beforeValue, job.changeType, 'beforeValue', {
+      allowNullableMetaDescription: true,
+    }),
     proposedValue,
     changedFields: extractChangedFieldsFromProposedValue(proposedValue),
   };
@@ -806,6 +913,34 @@ function assertChangeJobApplyState(job: ChangeJobRecord): void {
   }
 }
 
+function assertChangeJobRollbackState(job: ChangeJobRecord): void {
+  switch (job.status) {
+    case 'applied':
+      return;
+    case 'rolled_back':
+      throw new RouteError(409, 'Ten change job zostal juz wycofany.', {
+        code: 'CHANGE_JOB_ALREADY_ROLLED_BACK',
+        jobId: job.id,
+      });
+    case 'preview_ready':
+      throw new RouteError(409, 'Ten change job nie zostal jeszcze zastosowany.', {
+        code: 'CHANGE_JOB_NOT_APPLIED',
+        jobId: job.id,
+      });
+    case 'failed':
+      throw new RouteError(409, 'Ten change job jest oznaczony jako failed i nie moze byc wycofany.', {
+        code: 'CHANGE_JOB_FAILED',
+        jobId: job.id,
+      });
+    default:
+      throw new RouteError(409, 'Ten change job nie moze zostac wycofany.', {
+        code: 'CHANGE_JOB_INVALID_STATE',
+        jobId: job.id,
+        status: job.status,
+      });
+  }
+}
+
 async function writeAppliedChangeJobHistory(args: {
   job: ChangeJobRecord;
   uid: string;
@@ -831,6 +966,31 @@ async function writeAppliedChangeJobHistory(args: {
   });
 }
 
+async function writeRolledBackChangeJobHistory(args: {
+  job: ChangeJobRecord;
+  uid: string;
+  siteUrl: string;
+  executionTimeMs: number;
+}): Promise<void> {
+  await writeChangeHistory({
+    projectId: args.job.projectId,
+    userId: args.uid,
+    siteUrl: args.siteUrl,
+    pageUrl: args.job.pageUrl,
+    actionType: mapChangeJobChangeTypeToHistoryActionType(args.job.changeType),
+    source: mapChangeJobSourceToHistorySource(args.job.source),
+    status: 'rolled_back',
+    beforeValue: serializeChangeJobValueForHistory(args.job.appliedValue, args.job.changeType),
+    afterValue: serializeChangeJobValueForHistory(args.job.rollbackValue, args.job.changeType),
+    summary: 'Rollback: ' + args.job.previewSummary,
+    entityType: mapChangeJobEntityTypeToHistoryEntityType(args.job.entityType),
+    entityId: args.job.entityId,
+    requestId: args.job.requestId,
+    actionId: args.job.id,
+    executionTimeMs: args.executionTimeMs,
+  });
+}
+
 async function failLegacyWordPressJob(jobId: string, message: string): Promise<void> {
   const legacyJob = await getWordPressJob(jobId);
   if (!legacyJob) {
@@ -839,6 +999,17 @@ async function failLegacyWordPressJob(jobId: string, message: string): Promise<v
 
   await updateWordPressJob(jobId, {
     status: 'failed',
+    error: message,
+  });
+}
+
+async function recordLegacyWordPressJobErrorIfPresent(jobId: string, message: string): Promise<void> {
+  const legacyJob = await getWordPressJob(jobId);
+  if (!legacyJob) {
+    return;
+  }
+
+  await updateWordPressJob(jobId, {
     error: message,
   });
 }
@@ -858,6 +1029,30 @@ async function markLegacyWordPressJobAppliedIfPresent(args: {
     error: null,
     targetUrl: args.targetUrl,
   });
+}
+
+async function markLegacyWordPressJobRolledBackIfPresent(args: {
+  jobId: string;
+  targetUrl: string | null;
+}): Promise<void> {
+  const legacyJob = await getWordPressJob(args.jobId);
+  if (!legacyJob) {
+    return;
+  }
+
+  await updateWordPressJob(args.jobId, {
+    status: 'rolled_back',
+    error: null,
+    targetUrl: args.targetUrl,
+  });
+}
+
+async function captureBaselineMeasurementsSafely(job: ChangeJobRecord): Promise<void> {
+  try {
+    await captureBaselineMeasurementsForAppliedJob(job);
+  } catch {
+    // Do not fail a successful WordPress apply if measurement baseline persistence is unavailable.
+  }
 }
 
 function buildRouteError(error: unknown, fallbackMessage: string): RouteError {
@@ -1322,9 +1517,21 @@ export async function applyWordPressChangeJob(
     });
 
     const appliedAt = Date.now();
+    const appliedValue = job.proposedValue;
+    const rollbackValue = job.beforeValue;
+    const appliedJob: ChangeJobRecord = {
+      ...job,
+      status: 'applied',
+      appliedValue,
+      rollbackValue,
+      appliedAt,
+      updatedAt: appliedAt,
+      error: null,
+    };
+
     await markChangeJobApplied(job.id, {
-      appliedValue: job.proposedValue,
-      rollbackValue: job.beforeValue,
+      appliedValue,
+      rollbackValue,
       appliedAt,
     });
     await markLegacyWordPressJobAppliedIfPresent({
@@ -1334,11 +1541,12 @@ export async function applyWordPressChangeJob(
 
     const executionTimeMs = Date.now() - startedAt;
     await writeAppliedChangeJobHistory({
-      job,
+      job: appliedJob,
       uid,
       siteUrl: connection.siteUrl,
       executionTimeMs,
     });
+    await captureBaselineMeasurementsSafely(appliedJob);
 
     return {
       ok: true,
@@ -1348,8 +1556,8 @@ export async function applyWordPressChangeJob(
       changeType: job.changeType,
       pageUrl: job.pageUrl,
       beforeValue: job.beforeValue,
-      appliedValue: job.proposedValue,
-      rollbackValue: job.beforeValue,
+      appliedValue,
+      rollbackValue,
       requestId: job.requestId,
       updatedItem: normalizeWordPressItem(updatedResource, plan.targetType),
     };
@@ -1364,6 +1572,141 @@ export async function applyWordPressChangeJob(
       updatedAt: Date.now(),
     });
     await failLegacyWordPressJob(job.id, routeError.message);
+
+    if (routeError.status === 401 && connection) {
+      await markRuntimeConnectionFailure(connection, routeError.message);
+    }
+
+    throw routeError;
+  }
+}
+
+export async function rollbackWordPressChangeJob(
+  uid: string,
+  jobId: string,
+): Promise<WordPressRollbackResponse> {
+  const startedAt = Date.now();
+  const job = await getChangeJob(jobId);
+
+  if (!job) {
+    throw new RouteError(404, 'Nie znaleziono change job.', {
+      code: 'CHANGE_JOB_NOT_FOUND',
+      jobId,
+    });
+  }
+
+  await assertProjectOwnedByUser(uid, job.projectId);
+
+  if (job.uid !== uid) {
+    throw new RouteError(403, 'Forbidden', {
+      code: 'CHANGE_JOB_FORBIDDEN',
+      jobId,
+    });
+  }
+
+  assertChangeJobRollbackState(job);
+
+  let connection: WordPressConnectionRecord | null = null;
+
+  try {
+    if (job.rollbackValue === null) {
+      throw new RouteError(409, 'Ten change job nie zawiera rollbackValue.', {
+        code: 'CHANGE_JOB_ROLLBACK_MISSING',
+        jobId: job.id,
+      });
+    }
+
+    const targetType = resolveChangeJobTargetType(job.entityType);
+    const targetId = resolveChangeJobTargetId(job.entityId);
+    const appliedValue = normalizeChangeJobValueForApply(job.appliedValue, job.changeType, 'appliedValue');
+    const rollbackValue = normalizeChangeJobValueForApply(job.rollbackValue, job.changeType, 'rollbackValue', {
+      allowNullableMetaDescription: true,
+    });
+    const changedFields = extractChangedFieldsFromProposedValue(appliedValue);
+    const auth = await getConnectedWordPressAuth(uid);
+    connection = auth.connection;
+    const applicationPassword = auth.applicationPassword;
+
+    if (connection.projectId?.trim() && connection.projectId.trim() !== job.projectId) {
+      throw new RouteError(409, 'To polaczenie WordPress jest przypisane do innego projektu.', {
+        code: 'WORDPRESS_PROJECT_MISMATCH',
+        jobId: job.id,
+      });
+    }
+
+    const currentResource = await wordpressRequest<WordPressResourceResponse>({
+      siteUrl: connection.siteUrl,
+      username: connection.wpUsername,
+      applicationPassword,
+      path: `/wp-json/wp/v2/${pluralizeTargetType(targetType)}/${targetId}`,
+      method: 'GET',
+      searchParams: {
+        context: 'edit',
+      },
+    });
+
+    const payload = buildWordPressRollbackPayload({
+      resource: currentResource,
+      changedFields,
+      appliedValue,
+      rollbackValue,
+    });
+
+    const updatedResource = await wordpressRequest<WordPressResourceResponse>({
+      siteUrl: connection.siteUrl,
+      username: connection.wpUsername,
+      applicationPassword,
+      path: `/wp-json/wp/v2/${pluralizeTargetType(targetType)}/${targetId}`,
+      method: 'POST',
+      body: payload,
+    });
+
+    const rolledBackAt = Date.now();
+    const rolledBackJob: ChangeJobRecord = {
+      ...job,
+      status: 'rolled_back',
+      updatedAt: rolledBackAt,
+      rolledBackAt,
+      error: null,
+    };
+
+    await markChangeJobRolledBack(job.id, { rolledBackAt });
+    await markLegacyWordPressJobRolledBackIfPresent({
+      jobId: job.id,
+      targetUrl: updatedResource.link ?? job.pageUrl,
+    });
+
+    const executionTimeMs = Date.now() - startedAt;
+    await writeRolledBackChangeJobHistory({
+      job: rolledBackJob,
+      uid,
+      siteUrl: connection.siteUrl,
+      executionTimeMs,
+    });
+
+    return {
+      ok: true,
+      jobId: job.id,
+      projectId: job.projectId,
+      status: 'rolled_back',
+      changeType: job.changeType,
+      pageUrl: job.pageUrl,
+      rollbackValue: job.rollbackValue,
+      rolledBackAt,
+      requestId: job.requestId,
+      updatedItem: normalizeWordPressItem(updatedResource, targetType),
+    };
+  } catch (error) {
+    const routeError = buildRouteError(error, 'Nie udalo sie wycofac change job w WordPress.');
+    const failurePayload = buildChangeJobFailurePayload(routeError, 'CHANGE_JOB_ROLLBACK_FAILED', {
+      jobId: job.id,
+    });
+
+    await updateChangeJob(job.id, {
+      error: failurePayload,
+      updatedAt: Date.now(),
+    });
+    await recordLegacyWordPressJobErrorIfPresent(job.id, routeError.message);
 
     if (routeError.status === 401 && connection) {
       await markRuntimeConnectionFailure(connection, routeError.message);

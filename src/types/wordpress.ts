@@ -6,7 +6,7 @@ import type {
 import type { ActionType, ChangeSource, EntityType } from '@/types/history';
 
 export type WordPressConnectionStatus = 'connected' | 'failed' | 'disconnected';
-export type WordPressJobStatus = 'preview' | 'applied' | 'failed';
+export type WordPressJobStatus = 'preview' | 'applied' | 'rolled_back' | 'failed';
 export type WordPressTargetType = 'page' | 'post';
 export type WordPressTargetTypePlural = 'pages' | 'posts';
 export type WordPressChangedField = 'title' | 'content' | 'meta_description';
@@ -131,6 +131,10 @@ export interface WordPressApplyJobRequestBody {
   jobId: string;
 }
 
+export interface WordPressRollbackRequestBody {
+  jobId: string;
+}
+
 export interface WordPressLegacyApplyRequestBody {
   projectId: string;
   siteUrl: string;
@@ -161,6 +165,19 @@ export interface WordPressApplyResponse {
   beforeValue: ChangeJobValue;
   appliedValue: ChangeJobValue;
   rollbackValue: ChangeJobValue;
+  requestId: string;
+  updatedItem: WordPressItemSummary;
+}
+
+export interface WordPressRollbackResponse {
+  ok: true;
+  jobId: string;
+  projectId: string;
+  status: Extract<ChangeJobStatus, 'rolled_back'>;
+  changeType: ChangeJobChangeType;
+  pageUrl: string;
+  rollbackValue: ChangeJobValue;
+  rolledBackAt: number;
   requestId: string;
   updatedItem: WordPressItemSummary;
 }

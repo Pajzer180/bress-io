@@ -102,6 +102,8 @@ export const wordpressApplyJobRequestSchema = z.object({
   jobId: nonEmptyTrimmedString(MAX_ID_LENGTH),
 }).strict();
 
+export const wordpressRollbackRequestSchema = wordpressApplyJobRequestSchema;
+
 export const wordpressLegacyApplyRequestSchema = z.object({
   projectId: nonEmptyTrimmedString(MAX_ID_LENGTH),
   siteUrl: nonEmptyTrimmedString(MAX_URL_LENGTH),
@@ -134,4 +136,5 @@ export type WordPressFetchRequestInput = z.infer<typeof wordpressFetchRequestSch
 export type WordPressPreviewRequestInput = z.infer<typeof wordpressPreviewRequestSchema>;
 export type WordPressApplyRequestInput = z.infer<typeof wordpressApplyRequestSchema>;
 export type WordPressLegacyApplyRequestInput = z.infer<typeof wordpressLegacyApplyRequestSchema>;
+export type WordPressRollbackRequestInput = z.infer<typeof wordpressRollbackRequestSchema>;
 export type WordPressDisconnectRequestInput = z.infer<typeof wordpressDisconnectRequestSchema>;

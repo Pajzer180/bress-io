@@ -66,6 +66,22 @@ export async function markChangeJobApplied(
   });
 }
 
+export async function markChangeJobRolledBack(
+  jobId: string,
+  args: {
+    rolledBackAt?: number;
+  },
+): Promise<void> {
+  const rolledBackAt = args.rolledBackAt ?? Date.now();
+
+  await updateChangeJob(jobId, {
+    status: 'rolled_back',
+    rolledBackAt,
+    updatedAt: rolledBackAt,
+    error: null,
+  });
+}
+
 export async function markChangeJobFailed(
   jobId: string,
   args: {
@@ -99,6 +115,27 @@ export async function listChangeJobsByProject(
   const snapshot = await query.get();
   const limit = typeof options.limit === 'number' && options.limit > 0
     ? Math.floor(options.limit)
+    : null;
+
+  const jobs = snapshot.docs
+    .map((doc) => ({
+      id: doc.id,
+      ...(doc.data() as Omit<ChangeJobRecord, 'id'>),
+    }))
+    .sort((left, right) => right.createdAt - left.createdAt);
+
+  return limit === null ? jobs : jobs.slice(0, limit);
+}
+export async function listChangeJobsByStatus(
+  status: ChangeJobStatus,
+  limitCount?: number,
+): Promise<ChangeJobRecord[]> {
+  const snapshot = await changeJobsCollection()
+    .where('status', '==', status)
+    .get();
+
+  const limit = typeof limitCount === 'number' && limitCount > 0
+    ? Math.floor(limitCount)
     : null;
 
   const jobs = snapshot.docs

@@ -4,6 +4,10 @@
     {
       "path": "/api/cron/gsc-sync",
       "schedule": "0 5 * * *"
+    },
+    {
+      "path": "/api/cron/measurement-refresh",
+      "schedule": "20 5 * * *"
     }
   ]
 }

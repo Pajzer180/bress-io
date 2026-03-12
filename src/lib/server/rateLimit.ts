@@ -11,6 +11,7 @@ export type RateLimitScope =
   | 'wordpress-fetch'
   | 'wordpress-preview'
   | 'wordpress-apply'
+  | 'wordpress-rollback'
   | 'gsc-connect'
   | 'gsc-callback'
   | 'gsc-sites'
@@ -85,6 +86,12 @@ const POLICY_DEFINITIONS: Record<RateLimitScope, RateLimitPolicyDefinition> = {
   'wordpress-apply': {
     bucket: 'wordpress-apply',
     envPrefix: 'RATE_LIMIT_WORDPRESS_APPLY',
+    defaultMax: 10,
+    defaultWindowMs: 300_000,
+  },
+  'wordpress-rollback': {
+    bucket: 'wordpress-rollback',
+    envPrefix: 'RATE_LIMIT_WORDPRESS_ROLLBACK',
     defaultMax: 10,
     defaultWindowMs: 300_000,
   },

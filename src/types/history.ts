@@ -14,7 +14,7 @@ export type ChangeSource =
   | 'wordpress_api'
   | 'future_automation';
 
-export type ChangeStatus = 'preview' | 'applied' | 'failed';
+export type ChangeStatus = 'preview' | 'applied' | 'rolled_back' | 'failed';
 export type EntityType = 'page' | 'post' | 'homepage' | 'unknown';
 
 export interface ChangeHistoryEntry {

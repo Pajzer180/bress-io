@@ -3,21 +3,37 @@ import 'server-only';
 import { z } from 'zod';
 import { optionalTrimmedString } from '@/lib/server/schemas/shared';
 
+const projectIdSchema = z.string().trim().min(1).max(200);
+const pageSortBySchema = z.enum(['clicks', 'impressions', 'ctr', 'position']);
+const sortDirSchema = z.enum(['asc', 'desc']);
+
 const returnToSchema = optionalTrimmedString(500)
   .transform((value) => value ?? '/dashboard/analityka');
 
 export const gscConnectRequestSchema = z.object({
-  projectId: z.string().trim().min(1).max(200),
+  projectId: projectIdSchema,
   returnTo: returnToSchema,
 }).strict();
 
 export const gscSelectSiteRequestSchema = z.object({
-  projectId: z.string().trim().min(1).max(200),
+  projectId: projectIdSchema,
   propertyUrl: z.string().trim().min(1).max(2_048),
 }).strict();
 
 export const gscSitesQuerySchema = z.object({
-  projectId: z.string().trim().min(1).max(200),
+  projectId: projectIdSchema,
+}).strict();
+
+export const gscSummaryQuerySchema = z.object({
+  projectId: projectIdSchema,
+}).strict();
+
+export const gscPagesQuerySchema = z.object({
+  projectId: projectIdSchema,
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  sortBy: pageSortBySchema.default('clicks'),
+  sortDir: sortDirSchema.default('desc'),
+  search: optionalTrimmedString(2_048).transform((value) => value ?? ''),
 }).strict();
 
 export const gscCallbackQuerySchema = z.object({

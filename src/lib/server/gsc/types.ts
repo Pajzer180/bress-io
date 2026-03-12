@@ -126,6 +126,10 @@ export interface SearchConsoleConnectionSnapshot {
   connection: SearchConsoleConnectionRecord;
 }
 
+export interface SearchConsoleCacheContext extends SearchConsoleConnectionSnapshot {
+  propertySiteUrl: string;
+}
+
 export interface SearchConsoleSyncContext {
   project: SearchConsoleProjectRecord;
   connection: SearchConsoleConnectionRecord;

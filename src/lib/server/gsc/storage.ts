@@ -1,19 +1,25 @@
 import 'server-only';
 
-import { getFirestoreAdmin } from '@/lib/server/firestoreAdmin';
+import { createHash } from 'crypto';
 import type { WriteBatch } from 'firebase-admin/firestore';
+import { getFirestoreAdmin } from '@/lib/server/firestoreAdmin';
+import { RouteError } from '@/lib/server/routeError';
 import {
   SEARCH_CONSOLE_DAILY_COLLECTION,
   SEARCH_CONSOLE_PAGES_28D_COLLECTION,
   SEARCH_CONSOLE_SYNC_RUNS_COLLECTION,
+  type SearchConsoleCacheContext,
 } from '@/lib/server/gsc/types';
+import {
+  getSearchConsoleConnection,
+  getSearchConsoleProject,
+} from '@/lib/searchConsole/repository';
 import type {
   SearchConsoleConnectionRecord,
   SearchConsoleDailyMetricRecord,
   SearchConsolePageMetricRecord,
   SearchConsoleSyncRunRecord,
 } from '@/types/searchConsole';
-import { createHash } from 'crypto';
 
 const MAX_BATCH_OPERATIONS = 400;
 
@@ -39,6 +45,73 @@ export async function listConnectedSearchConsoleConnections(): Promise<SearchCon
     id: doc.id,
     ...(doc.data() as Omit<SearchConsoleConnectionRecord, 'id'>),
   }));
+}
+
+export async function getSearchConsoleCacheContext(projectId: string): Promise<SearchConsoleCacheContext> {
+  const project = await getSearchConsoleProject(projectId);
+  if (!project) {
+    throw new RouteError(404, 'Project not found.', {
+      code: 'SEARCH_CONSOLE_PROJECT_NOT_FOUND',
+    });
+  }
+
+  const connection = await getSearchConsoleConnection(projectId);
+  if (!connection || connection.status !== 'connected') {
+    throw new RouteError(409, 'Najpierw polacz Google Search Console dla tego projektu.', {
+      code: 'SEARCH_CONSOLE_NOT_CONNECTED',
+    });
+  }
+
+  const propertySiteUrl = project.searchConsole?.selectedPropertyUrl?.trim() ?? '';
+  if (!propertySiteUrl) {
+    throw new RouteError(409, 'Brakuje wybranej wlasciwosci Search Console dla projektu.', {
+      code: 'SEARCH_CONSOLE_PROPERTY_INVALID',
+      reason: 'missing-selected-property',
+    });
+  }
+
+  return {
+    project,
+    connection,
+    propertySiteUrl,
+  };
+}
+
+export async function listSearchConsoleDailyMetrics(projectId: string): Promise<SearchConsoleDailyMetricRecord[]> {
+  const snapshot = await dailyCollection()
+    .where('projectId', '==', projectId)
+    .get();
+
+  return snapshot.docs.map((doc) => doc.data() as SearchConsoleDailyMetricRecord);
+}
+
+export async function listSearchConsolePageMetrics(projectId: string): Promise<SearchConsolePageMetricRecord[]> {
+  const snapshot = await pagesCollection()
+    .where('projectId', '==', projectId)
+    .get();
+
+  return snapshot.docs.map((doc) => doc.data() as SearchConsolePageMetricRecord);
+}
+
+export async function getLatestSearchConsoleSyncRun(projectId: string): Promise<SearchConsoleSyncRunRecord | null> {
+  const snapshot = await syncRunsCollection()
+    .where('projectId', '==', projectId)
+    .get();
+
+  const runs = snapshot.docs
+    .map((doc) => ({
+      id: doc.id,
+      ...(doc.data() as Omit<SearchConsoleSyncRunRecord, 'id'>),
+    }))
+    .sort((left, right) => {
+      if (right.finishedAt !== left.finishedAt) {
+        return right.finishedAt - left.finishedAt;
+      }
+
+      return right.startedAt - left.startedAt;
+    });
+
+  return runs[0] ?? null;
 }
 
 export function buildSearchConsoleDailyDocId(projectId: string, date: string): string {

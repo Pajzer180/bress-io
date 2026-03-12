@@ -6,6 +6,8 @@ export type SearchConsolePropertyPermissionLevel =
   | 'siteUnverifiedUser';
 export type SearchConsoleSyncRunStatus = 'success' | 'failed';
 export type SearchConsoleProjectSyncStatus = 'synced' | 'skipped' | 'failed';
+export type SearchConsolePagesSortBy = 'clicks' | 'impressions' | 'ctr' | 'position';
+export type SearchConsoleSortDir = 'asc' | 'desc';
 
 export interface SearchConsolePropertySummary {
   siteUrl: string;
@@ -94,6 +96,63 @@ export interface SearchConsoleProjectSyncResult {
   startDate?: string;
   endDate?: string;
   counts?: SearchConsoleProjectSyncCounts;
+}
+
+export interface SearchConsoleSummaryDailyPoint {
+  date: string;
+  clicks: number;
+  impressions: number;
+  ctr: number;
+  position: number;
+}
+
+export interface SearchConsoleSummaryResponse {
+  projectId: string;
+  propertySiteUrl: string;
+  windowDays: number;
+  totals: {
+    clicks: number;
+    impressions: number;
+    avgCtr: number;
+    avgPosition: number;
+  };
+  trend: {
+    daily: SearchConsoleSummaryDailyPoint[];
+  };
+  freshness: {
+    hasData: boolean;
+    lastSyncedAt: number | null;
+  };
+  connected: boolean;
+  selectedPropertyUrl: string | null;
+}
+
+export interface SearchConsolePagesQuery {
+  projectId: string;
+  limit: number;
+  sortBy: SearchConsolePagesSortBy;
+  sortDir: SearchConsoleSortDir;
+  search: string;
+}
+
+export interface SearchConsolePagesRow {
+  pageUrl: string;
+  clicks: number;
+  impressions: number;
+  ctr: number;
+  position: number;
+  startDate: string;
+  endDate: string;
+  syncedAt: number;
+}
+
+export interface SearchConsolePagesResponse {
+  projectId: string;
+  propertySiteUrl: string;
+  windowDays: number;
+  count: number;
+  lastSyncedAt: number | null;
+  rows: SearchConsolePagesRow[];
 }
 
 export interface SearchConsoleConnectRequestBody {

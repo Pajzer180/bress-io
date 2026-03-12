@@ -9,18 +9,20 @@ import {
 
 const ALGORITHM = 'aes-256-gcm';
 
-function getSecretKey(): Buffer {
-  const secret = process.env.WORDPRESS_CREDENTIALS_SECRET;
+type SecretEnvName = 'WORDPRESS_CREDENTIALS_SECRET' | 'GSC_TOKENS_SECRET';
+
+function getSecretKey(secretName: SecretEnvName): Buffer {
+  const secret = process.env[secretName]?.trim();
   if (!secret) {
-    throw new Error('Missing WORDPRESS_CREDENTIALS_SECRET');
+    throw new Error(`Missing ${secretName}`);
   }
 
   return createHash('sha256').update(secret).digest();
 }
 
-export function encryptSecret(plainText: string): string {
+function encryptWithSecret(plainText: string, secretName: SecretEnvName): string {
   const iv = randomBytes(12);
-  const cipher = createCipheriv(ALGORITHM, getSecretKey(), iv);
+  const cipher = createCipheriv(ALGORITHM, getSecretKey(secretName), iv);
   const encrypted = Buffer.concat([
     cipher.update(plainText, 'utf8'),
     cipher.final(),
@@ -35,7 +37,7 @@ export function encryptSecret(plainText: string): string {
   ].join('.');
 }
 
-export function decryptSecret(payload: string): string {
+function decryptWithSecret(payload: string, secretName: SecretEnvName): string {
   const [version, ivPart, tagPart, encryptedPart] = payload.split('.');
   if (version !== 'v1' || !ivPart || !tagPart || !encryptedPart) {
     throw new Error('Invalid encrypted secret payload');
@@ -43,7 +45,7 @@ export function decryptSecret(payload: string): string {
 
   const decipher = createDecipheriv(
     ALGORITHM,
-    getSecretKey(),
+    getSecretKey(secretName),
     Buffer.from(ivPart, 'base64url'),
   );
   decipher.setAuthTag(Buffer.from(tagPart, 'base64url'));
@@ -54,4 +56,29 @@ export function decryptSecret(payload: string): string {
   ]);
 
   return decrypted.toString('utf8');
+}
+
+export function encryptSecret(plainText: string): string {
+  return encryptWithSecret(plainText, 'WORDPRESS_CREDENTIALS_SECRET');
+}
+
+export function decryptSecret(payload: string): string {
+  return decryptWithSecret(payload, 'WORDPRESS_CREDENTIALS_SECRET');
+}
+
+export function encryptGscSecret(plainText: string): string {
+  return encryptWithSecret(plainText, 'GSC_TOKENS_SECRET');
+}
+
+export function decryptGscSecret(payload: string): string {
+  try {
+    return decryptWithSecret(payload, 'GSC_TOKENS_SECRET');
+  } catch (error) {
+    const hasLegacyWordPressSecret = Boolean(process.env.WORDPRESS_CREDENTIALS_SECRET?.trim());
+    if (!hasLegacyWordPressSecret) {
+      throw error;
+    }
+
+    return decryptWithSecret(payload, 'WORDPRESS_CREDENTIALS_SECRET');
+  }
 }

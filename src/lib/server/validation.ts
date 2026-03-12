@@ -1,9 +1,9 @@
-﻿import 'server-only';
+import 'server-only';
 
 import { z } from 'zod';
 import { RouteError } from '@/lib/server/routeError';
 
-type ValidationTarget = 'request_body' | 'model_output';
+type ValidationTarget = 'request_body' | 'request_query' | 'model_output';
 
 interface ValidationOptions {
   code?: 'VALIDATION_ERROR' | 'MODEL_OUTPUT_INVALID';
@@ -17,6 +17,13 @@ const DEFAULT_REQUEST_VALIDATION_OPTIONS: ValidationOptions = {
   message: 'Invalid request body.',
   status: 400,
   target: 'request_body',
+};
+
+const DEFAULT_QUERY_VALIDATION_OPTIONS: ValidationOptions = {
+  code: 'VALIDATION_ERROR',
+  message: 'Invalid request query.',
+  status: 400,
+  target: 'request_query',
 };
 
 const DEFAULT_MODEL_VALIDATION_OPTIONS: ValidationOptions = {
@@ -48,6 +55,21 @@ export async function readJsonRequestBody<T>(
     ...DEFAULT_REQUEST_VALIDATION_OPTIONS,
     ...options,
   });
+}
+
+export function parseSearchParamsWithSchema<T>(
+  searchParams: URLSearchParams,
+  schema: z.ZodType<T>,
+  options: Partial<ValidationOptions> = {},
+): T {
+  return parseWithSchema(
+    schema,
+    Object.fromEntries(searchParams.entries()),
+    {
+      ...DEFAULT_QUERY_VALIDATION_OPTIONS,
+      ...options,
+    },
+  );
 }
 
 export function parseJsonStringWithSchema<T>(

@@ -16,8 +16,6 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
 ## Backend Security Notes
@@ -32,6 +30,15 @@ Protected routes:
 - `/api/wordpress/preview`
 - `/api/wordpress/apply`
 - `/api/wordpress/disconnect`
+- `/api/gsc/connect`
+- `/api/gsc/sites`
+- `/api/gsc/select-site`
+- `/api/search-console/connect`
+- `/api/search-console/select-property`
+
+Google callback routes:
+- `/api/gsc/callback`
+- `/api/search-console/callback`
 
 Shared helpers used by protected routes:
 - `requireAuthenticatedUid()` for bearer-token auth checks
@@ -41,19 +48,35 @@ Shared helpers used by protected routes:
 
 Env vars used by this backend:
 - `NEXT_PUBLIC_FIREBASE_API_KEY` for the frontend Firebase web SDK config
-- `FIREBASE_ADMIN_PROJECT_ID`, `FIREBASE_ADMIN_CLIENT_EMAIL`, and `FIREBASE_ADMIN_PRIVATE_KEY` for the new server-only Firebase Admin layer in `src/lib/server/firebaseAdmin.ts`
+- `FIREBASE_ADMIN_PROJECT_ID`, `FIREBASE_ADMIN_CLIENT_EMAIL`, and `FIREBASE_ADMIN_PRIVATE_KEY` for the server-only Firebase Admin layer in `src/lib/server/firebaseAdmin.ts`
+- `GOOGLE_SEARCH_CONSOLE_CLIENT_ID`, `GOOGLE_SEARCH_CONSOLE_CLIENT_SECRET`, and `GOOGLE_SEARCH_CONSOLE_REDIRECT_URI` for the Google Search Console OAuth flow
 - `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` for model-backed routes
 - `WORDPRESS_CREDENTIALS_SECRET` for encrypting stored WordPress credentials
+- `GSC_TOKENS_SECRET` for encrypting stored Google Search Console refresh tokens
 - `RATE_LIMIT_*` variables from `.env.example` to override per-route limits and windows
 
 Firebase Admin layer:
 - The Admin module is server-only, initializes lazily, and reuses the existing default Admin app when it already exists.
 - Credentials are read from env vars instead of a checked-in service-account JSON file.
-- Server-side bearer-token verification now uses `getFirebaseAdminAuth().verifyIdToken(...)`; some server Firestore reads still use the client SDK and can migrate later.
+- Server-side bearer-token verification uses `getFirebaseAdminAuth().verifyIdToken(...)`.
+
+Search Console OAuth flow:
+- `/api/gsc/connect` starts the Google OAuth flow for an authenticated project owner and returns a Google authorization URL.
+- `/api/gsc/callback` validates the server-stored OAuth state, exchanges the code, stores the encrypted refresh token server-side, refreshes the project Search Console summary, and redirects back to onboarding or analytics.
+- `/api/gsc/sites` lists the currently available Search Console properties for the connected account using a refreshed access token.
+- `/api/gsc/select-site` lets the project owner choose which connected Search Console property is mapped to the project.
+- Legacy `/api/search-console/*` routes remain as compatibility wrappers around the same backend service.
+- The flow requests the minimal Search Console read scope: `https://www.googleapis.com/auth/webmasters.readonly`.
+
+Search Console storage:
+- Encrypted refresh tokens live in the server-only `search_console_connections` collection and use `GSC_TOKENS_SECRET`.
+- Short-lived OAuth state records live in `search_console_oauth_states` and are consumed on callback.
+- Non-sensitive Search Console summary data is mirrored onto `projects.{searchConsole}` for UI reads.
+- Refresh tokens never reach the client.
 
 Rate limiting behavior:
 - Rate limiting is in-memory and per application instance.
-- Current protected rate-limited routes are chat, generate, and WordPress connect/test/fetch/preview/apply.
+- Current protected rate-limited routes are chat, generate, WordPress connect/test/fetch/preview/apply, and GSC connect/callback/sites/select-site.
 - Rate limit responses use HTTP `429` with `details.code = "RATE_LIMITED"` and a `Retry-After` header.
 - Misconfigured rate-limit env vars fail closed with HTTP `503` and `details.code = "RATE_LIMIT_UNAVAILABLE"`.
 
@@ -68,7 +91,13 @@ SSRF protections:
 
 Manual test plan:
 - Verify authenticated protected routes return `401` with `details.code = "AUTH_UNAUTHORIZED"` when the bearer token is missing or invalid.
-- Verify chat and WordPress rate-limited routes return `429` with `details.code = "RATE_LIMITED"` and `Retry-After`.
+- Verify `/api/gsc/connect` returns a Google authorization URL only for an authenticated owner of the requested project.
+- Verify the Google callback redirects back to `/dashboard/analityka?gsc=connected` or `/onboarding?gsc=connected` after consent.
+- Verify invalid or expired callback state returns structured `400` JSON.
+- Verify the callback writes only the non-sensitive Search Console summary to the project and does not expose refresh tokens to the client.
+- Verify `/api/gsc/sites` returns the connected account properties and refreshes the project summary.
+- Verify property selection persists to the project and rejects properties that are not in the connected Google account list.
+- Verify chat, WordPress, and GSC rate-limited routes return `429` with `details.code = "RATE_LIMITED"` and `Retry-After`.
 - Verify `/api/chat` blocks `http://localhost`, `http://127.0.0.1`, `http://10.0.0.1`, and `http://169.254.169.254`.
 - Verify WordPress connect/test/fetch/preview/apply block private or internal site URLs with the shared blocked-or-invalid JSON response.
 - Verify a public redirect to a blocked destination is denied.

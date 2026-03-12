@@ -10,7 +10,11 @@ export type RateLimitScope =
   | 'wordpress-test'
   | 'wordpress-fetch'
   | 'wordpress-preview'
-  | 'wordpress-apply';
+  | 'wordpress-apply'
+  | 'gsc-connect'
+  | 'gsc-callback'
+  | 'gsc-sites'
+  | 'gsc-select-site';
 
 interface RateLimitPolicyDefinition {
   bucket: string;
@@ -81,6 +85,30 @@ const POLICY_DEFINITIONS: Record<RateLimitScope, RateLimitPolicyDefinition> = {
     envPrefix: 'RATE_LIMIT_WORDPRESS_APPLY',
     defaultMax: 10,
     defaultWindowMs: 300_000,
+  },
+  'gsc-connect': {
+    bucket: 'gsc-connect',
+    envPrefix: 'RATE_LIMIT_GSC_CONNECT',
+    defaultMax: 10,
+    defaultWindowMs: 300_000,
+  },
+  'gsc-callback': {
+    bucket: 'gsc-callback',
+    envPrefix: 'RATE_LIMIT_GSC_CALLBACK',
+    defaultMax: 20,
+    defaultWindowMs: 300_000,
+  },
+  'gsc-sites': {
+    bucket: 'gsc-sites',
+    envPrefix: 'RATE_LIMIT_GSC_SITES',
+    defaultMax: 30,
+    defaultWindowMs: 60_000,
+  },
+  'gsc-select-site': {
+    bucket: 'gsc-select-site',
+    envPrefix: 'RATE_LIMIT_GSC_SELECT_SITE',
+    defaultMax: 20,
+    defaultWindowMs: 60_000,
   },
 };
 

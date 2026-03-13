@@ -62,15 +62,12 @@ export default function ChatLayout() {
   const [initialMessages, setInitialMessages] = useState<InitialMessage[]>([]);
   const [agentMode,       setAgentMode]       = useState<AgentMode>('business');
   const [agentStyle,      setAgentStyle]      = useState<AgentStyle>('action');
-  const [sidebarOpen,     setSidebarOpen]     = useState(true);
+  const [sidebarOpen,     setSidebarOpen]     = useState(() => (
+    typeof window === 'undefined' || window.innerWidth >= 768
+  ));
   const [activeSiteUrl,   setActiveSiteUrl]   = useState<string | null>(null);
   const [activeSiteDomain, setActiveSiteDomain] = useState<string | null>(null);
   const [activeSiteSource, setActiveSiteSource] = useState<'snippet' | null>(null);
-
-  // Close sidebar on mobile by default (runs only on client)
-  useEffect(() => {
-    if (window.innerWidth < 768) setSidebarOpen(false);
-  }, []);
 
   useEffect(() => {
     if (!loading && !user) router.push('/login');

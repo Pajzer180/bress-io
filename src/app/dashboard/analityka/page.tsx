@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   AlertTriangle,
@@ -104,7 +104,15 @@ function getSearchConsoleFeedback(
   }
 }
 
-export default function AnalitykaPage() {
+function AnalitykaPageFallback() {
+  return (
+    <div className="flex flex-1 items-center justify-center bg-black">
+      <div className="h-8 w-8 animate-spin rounded-full border-4 border-purple-500 border-t-transparent" />
+    </div>
+  );
+}
+
+function AnalitykaPageContent() {
   const { user, profile, loading } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -579,5 +587,13 @@ export default function AnalitykaPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function AnalitykaPage() {
+  return (
+    <Suspense fallback={<AnalitykaPageFallback />}>
+      <AnalitykaPageContent />
+    </Suspense>
   );
 }

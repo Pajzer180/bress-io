@@ -29,8 +29,8 @@ function extractText(parts: MessagePart[]): string {
     .join('');
 }
 
-const SEO_MARKER = /__SEO_DATA__:(.+?)__END_SEO__\n?/s;
-const SEO_STRIP  = /__SEO_DATA__:.+?__END_SEO__\n?/gs;
+const SEO_MARKER = /__SEO_DATA__:([\s\S]+?)__END_SEO__\n?/;
+const SEO_STRIP = /__SEO_DATA__:[\s\S]+?__END_SEO__\n?/g;
 
 function parseMessageContent(text: string): { seoData: SeoCardData | null; cleanBody: string } {
   const match = text.match(SEO_MARKER);
@@ -44,7 +44,7 @@ function parseMessageContent(text: string): { seoData: SeoCardData | null; clean
 }
 
 const markdownComponents: Components = {
-  code({ className, children, ...props }) {
+  code({ children, ...props }) {
     const isBlock = !props.node?.position || String(children).includes('\n');
     if (isBlock) {
       return <CodeBlock>{String(children).replace(/\n$/, '')}</CodeBlock>;
@@ -55,7 +55,7 @@ const markdownComponents: Components = {
       </code>
     );
   },
-  a({ node, children, ...props }) {
+  a({ children, ...props }) {
     return (
       <a
         {...props}

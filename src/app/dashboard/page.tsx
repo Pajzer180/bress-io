@@ -3,10 +3,17 @@
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
 import { Bot } from 'lucide-react';
+import { useEffect } from 'react';
 
 export default function OverviewPage() {
   const { user, loading } = useAuth();
   const router = useRouter();
+
+  useEffect(() => {
+    if (!loading && !user) {
+      router.replace('/login');
+    }
+  }, [loading, router, user]);
 
   if (loading) {
     return (
@@ -17,7 +24,6 @@ export default function OverviewPage() {
   }
 
   if (!user) {
-    router.push('/login');
     return null;
   }
 

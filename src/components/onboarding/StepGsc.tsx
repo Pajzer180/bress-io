@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { AlertCircle, CheckCircle, Globe, Loader2 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
@@ -66,6 +66,38 @@ export function StepGsc({ connected, onConnectionChange, projectProfile }: StepG
 
   const projectId = project?.id ?? null;
   const projectStatus = project?.searchConsole?.status ?? null;
+  const selectedPropertyUrl = project?.searchConsole?.selectedPropertyUrl ?? '';
+  const firstAvailablePropertyUrl = project?.searchConsole?.availableProperties?.[0]?.siteUrl ?? '';
+
+  const propertyDraftRef = useRef(propertyDraft);
+  const lastConnectionValueRef = useRef<boolean | null>(null);
+  const onConnectionChangeRef = useRef(onConnectionChange);
+
+  useEffect(() => {
+    propertyDraftRef.current = propertyDraft;
+  }, [propertyDraft]);
+
+  useEffect(() => {
+    onConnectionChangeRef.current = onConnectionChange;
+  }, [onConnectionChange]);
+
+  const syncPropertyDraft = useCallback((nextDraft: string) => {
+    if (propertyDraftRef.current === nextDraft) {
+      return;
+    }
+
+    propertyDraftRef.current = nextDraft;
+    setPropertyDraft(nextDraft);
+  }, []);
+
+  const syncConnectionChange = useCallback((nextConnected: boolean) => {
+    if (lastConnectionValueRef.current === nextConnected) {
+      return;
+    }
+
+    lastConnectionValueRef.current = nextConnected;
+    onConnectionChangeRef.current(nextConnected);
+  }, []);
 
   const feedback = useMemo(
     () => getSearchConsoleFeedback(gscStatus, gscReason),
@@ -153,27 +185,27 @@ export function StepGsc({ connected, onConnectionChange, projectProfile }: StepG
         };
       });
 
-      setPropertyDraft(response.selectedPropertyUrl ?? response.items[0]?.siteUrl ?? '');
-      onConnectionChange(Boolean(response.selectedPropertyUrl));
+      syncPropertyDraft(response.selectedPropertyUrl ?? response.items[0]?.siteUrl ?? '');
+      syncConnectionChange(Boolean(response.selectedPropertyUrl));
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : String(nextError));
-      onConnectionChange(false);
+      syncConnectionChange(false);
     } finally {
       setSitesLoading(false);
     }
-  }, [fetchAuthorized, onConnectionChange]);
+  }, [fetchAuthorized, syncConnectionChange, syncPropertyDraft]);
 
   useEffect(() => {
     void loadProject();
   }, [loadProject]);
 
   useEffect(() => {
-    const nextDraft = project?.searchConsole?.selectedPropertyUrl
-      ?? project?.searchConsole?.availableProperties?.[0]?.siteUrl
-      ?? '';
-    setPropertyDraft(nextDraft);
-    onConnectionChange(Boolean(project?.searchConsole?.selectedPropertyUrl));
-  }, [onConnectionChange, project?.searchConsole?.availableProperties, project?.searchConsole?.selectedPropertyUrl]);
+    syncPropertyDraft(selectedPropertyUrl || firstAvailablePropertyUrl);
+  }, [firstAvailablePropertyUrl, selectedPropertyUrl, syncPropertyDraft]);
+
+  useEffect(() => {
+    syncConnectionChange(Boolean(selectedPropertyUrl));
+  }, [selectedPropertyUrl, syncConnectionChange]);
 
   useEffect(() => {
     if (!projectId || !user) {
@@ -247,7 +279,7 @@ export function StepGsc({ connected, onConnectionChange, projectProfile }: StepG
       });
 
       await loadSites(projectId);
-      onConnectionChange(true);
+      syncConnectionChange(true);
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : String(nextError));
     } finally {
